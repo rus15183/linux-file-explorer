@@ -1,0 +1,25 @@
+# Fast image for routers: no compiler, just downloads the ready static binary
+# for this CPU from GitHub Releases.
+#
+#   docker build -t lfe -f Dockerfile.prebuilt https://github.com/rus15183/linux-file-explorer.git
+FROM alpine:3.20 AS fetch
+ARG VERSION=latest
+RUN set -e; \
+    case "$(uname -m)" in \
+      x86_64) A=amd64 ;; \
+      aarch64) A=arm64 ;; \
+      armv7*) A=armv7 ;; \
+      armv6*|armv5*) A=armv5 ;; \
+      mips) A=mips ;; \
+      mipsel|mipsle) A=mipsle ;; \
+      *) echo "unsupported CPU: $(uname -m)"; exit 1 ;; \
+    esac; \
+    if [ "$VERSION" = latest ]; then U=latest/download; else U=download/$VERSION; fi; \
+    wget -O /lfe "https://github.com/rus15183/linux-file-explorer/releases/$U/lfe-linux-$A"; \
+    chmod +x /lfe
+
+FROM scratch
+COPY --from=fetch /lfe /lfe
+ENV LFE_ROOT=/mnt LFE_LISTEN=:8080
+EXPOSE 8080
+ENTRYPOINT ["/lfe"]

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux File Explorer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e8a317' d='M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="addr">
+  <button id="btnBack" class="ico" data-tip="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <button id="btnFwd" class="ico" data-tip="forward"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+  <button id="btnUp" class="ico" data-tip="up"><svg viewBox="0 0 24 24"><path d="M12 19V6M6 12l6-6 6 6"/></svg></button>
+  <button id="btnRefresh" class="ico" data-tip="refresh"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
+  <nav id="crumbs" class="crumbs"></nav>
+  <input id="filter" class="filter" type="search" autocomplete="off">
+</header>
+
+<div class="toolbar">
+  <button id="tbNew"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 11v5M9.5 13.5h5"/></svg><span data-t="newFolder"></span></button>
+  <span class="sep"></span>
+  <button id="tbCut"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 16.5L18 4M16 16.5L6 4"/></svg><span data-t="cut"></span></button>
+  <button id="tbCopy"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-t="copy"></span></button>
+  <button id="tbPaste"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M9 12h6M9 16h6"/></svg><span data-t="paste"></span></button>
+  <span class="sep"></span>
+  <button id="tbRename"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg><span data-t="rename"></span></button>
+  <button id="tbDelete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg><span data-t="delete"></span></button>
+  <span class="sep"></span>
+  <button id="tbDownload"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><span data-t="download"></span></button>
+</div>
+
+<main>
+  <aside id="nav" class="nav"></aside>
+  <section id="pane" class="pane" tabindex="0">
+    <table class="list">
+      <thead><tr>
+        <th data-sort="name" class="c-name"></th>
+        <th data-sort="mtime" class="c-date"></th>
+        <th data-sort="type" class="c-type"></th>
+        <th data-sort="size" class="c-size"></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden></div>
+  </section>
+</main>
+
+<section id="ops" class="ops">
+  <div class="ops-head">
+    <button id="opsToggle" class="ico small"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <b id="opsTitle"></b>
+    <span id="opsSummary" class="muted"></span>
+    <span class="grow"></span>
+    <button id="opsClear" class="link"></button>
+  </div>
+  <div id="jobs" class="jobs"></div>
+</section>
+
+<footer class="status">
+  <span id="stCount"></span>
+  <span id="stSel"></span>
+  <span id="stClip"></span>
+  <span class="grow"></span>
+  <span id="stVer" class="muted"></span>
+  <button id="btnLang" class="link"></button>
+</footer>
+
+<div id="menu" class="menu" hidden></div>
+<div id="modal" class="modal" hidden><div class="dlg"><h3 id="dlgTitle"></h3><div id="dlgBody"></div><input id="dlgInput" type="text" autocomplete="off" spellcheck="false"><div id="dlgBtns" class="dlg-btns"></div></div></div>
+<div id="toasts" class="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

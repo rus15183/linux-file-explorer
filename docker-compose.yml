@@ -1,0 +1,19 @@
+services:
+  lfe:
+    build:
+      context: .
+      dockerfile: Dockerfile.prebuilt   # or "Dockerfile" to compile from source
+    image: lfe
+    container_name: lfe
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Everything under /mnt of the host becomes visible in the UI.
+      # Add ":rslave" (-> /mnt:/mnt:rslave) to see disks plugged in after start;
+      # this needs a shared host mount: mount --make-rshared /
+      - /mnt:/mnt
+    environment:
+      # LFE_USER: admin          # optional HTTP basic auth
+      # LFE_PASSWORD: change-me
+      LFE_ROOT: /mnt
