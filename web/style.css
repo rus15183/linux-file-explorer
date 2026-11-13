@@ -127,6 +127,8 @@ main { flex: 1; display: flex; min-height: 0; }
 /* status bar */
 .status { display: flex; gap: 16px; align-items: center; padding: 3px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 
+.status .net { color: var(--danger); font-weight: 600; }
+
 /* menu, dialog, toasts */
 .menu { position: fixed; z-index: 50; min-width: 190px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
 .menu button { display: flex; width: 100%; padding: 6px 12px; text-align: left; justify-content: space-between; gap: 24px; }
@@ -138,6 +140,9 @@ main { flex: 1; display: flex; min-height: 0; }
 .dlg { width: min(460px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 20px; }
 .dlg h3 { margin: 0 0 10px; font-size: 16px; font-weight: 600; }
 #dlgBody { white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; user-select: text; }
+.busy { height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; margin-top: 14px; }
+.busy b { display: block; height: 100%; width: 30%; background: var(--accent); animation: slide 1.2s infinite ease-in-out; }
+.note { margin-top: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dlg input { width: 100%; margin-top: 12px; padding: 7px 10px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; outline: none; }
 .dlg-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 .dlg-btns button { padding: 6px 16px; border: 1px solid var(--line); background: var(--bg); min-width: 84px; }

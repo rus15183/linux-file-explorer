@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -24,6 +25,7 @@ func (a *App) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mkdir", a.hMkdir)
 	mux.HandleFunc("POST /api/rename", a.hRename)
 	mux.HandleFunc("POST /api/check", a.hCheck)
+	mux.HandleFunc("POST /api/size", a.hSize)
 	mux.HandleFunc("GET /api/jobs", a.hJobs)
 	mux.HandleFunc("POST /api/jobs", a.hCreateJob)
 	mux.HandleFunc("POST /api/jobs/clear", a.hClear)
@@ -249,6 +251,101 @@ func (a *App) hRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+type sizeResult struct {
+	Bytes  int64   `json:"bytes"`
+	Files  int64   `json:"files"`
+	Dirs   int64   `json:"dirs"`
+	Errors int64   `json:"errors"`
+	Done   bool    `json:"done"`
+	Cur    string  `json:"cur,omitempty"`   // folder being scanned right now
+	Sizes  []int64 `json:"sizes,omitempty"` // per requested path, in the final line
+}
+
+// hSize measures files and folders. It runs outside the job queue (it only
+// reads) and streams running totals as JSON lines, so the UI shows progress.
+// Closing the dialog aborts the request, which stops the walk.
+func (a *App) hSize(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Paths []string }
+	if !readJSON(w, r, &req) {
+		return
+	}
+	paths := make([]string, 0, len(req.Paths))
+	for _, p := range req.Paths {
+		rp, err := a.resolve(p)
+		if err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+		paths = append(paths, rp)
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	enc := json.NewEncoder(w)
+	ctx := r.Context()
+	var cur sizeResult
+	last := time.Now()
+	emit := func() {
+		_ = enc.Encode(cur)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		last = time.Now()
+	}
+	var walk func(p string, info fs.FileInfo) bool
+	walk = func(p string, info fs.FileInfo) bool {
+		if !info.IsDir() {
+			cur.Files++
+			if info.Mode().IsRegular() {
+				cur.Bytes += info.Size()
+			}
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		if time.Since(last) > 300*time.Millisecond {
+			cur.Cur = a.virt(p)
+			emit()
+		}
+		cur.Dirs++
+		entries, err := os.ReadDir(p)
+		if err != nil {
+			cur.Errors++
+		}
+		for _, e := range entries {
+			fi, err := e.Info()
+			if err != nil {
+				cur.Errors++
+				continue
+			}
+			if !walk(filepath.Join(p, e.Name()), fi) {
+				return false
+			}
+		}
+		return true
+	}
+	sizes := make([]int64, 0, len(paths))
+	for _, p := range paths {
+		before := cur.Bytes
+		info, err := os.Lstat(p)
+		if err != nil {
+			cur.Errors++
+			sizes = append(sizes, 0)
+			continue
+		}
+		if !walk(p, info) {
+			return
+		}
+		if info.IsDir() {
+			cur.Dirs-- // like Windows: do not count the measured folder itself
+		}
+		sizes = append(sizes, cur.Bytes-before)
+	}
+	cur.Done, cur.Sizes, cur.Cur = true, sizes, ""
+	emit()
 }
 
 type jobReq struct {

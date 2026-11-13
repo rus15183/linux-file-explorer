@@ -25,6 +25,9 @@ const L = {
     delTitle: 'Удаление', delText: 'Удалить безвозвратно {0}?', delOne: '«{0}»',
     conflictTitle: 'Замена или пропуск файлов', conflictText: 'В папке назначения «{1}» уже есть элементы с такими именами ({0}):',
     andMore: '…и ещё {0}', replace: 'Заменить', skip: 'Пропустить', keepBoth: 'Сохранить оба',
+    size: 'Размер', sizeTitle: 'Размер: {0}', sizeTotal: 'Размер', filesN: 'Файлов', foldersN: 'Папок', bytes: 'байт',
+    counting: 'Идёт подсчёт…', unreadable: 'Не удалось прочитать элементов: {0}', close: 'Закрыть',
+    gone: 'Папка «{0}» больше не существует.', offline: 'Нет связи с сервером',
     sameFolder: 'Конечная папка совпадает с исходной.', intoSelf: 'Нельзя переместить папку в саму себя.',
   },
   en: {
@@ -49,6 +52,9 @@ const L = {
     delTitle: 'Delete', delText: 'Permanently delete {0}?', delOne: '"{0}"',
     conflictTitle: 'Replace or skip files', conflictText: 'The destination "{1}" already has items with these names ({0}):',
     andMore: '…and {0} more', replace: 'Replace', skip: 'Skip', keepBoth: 'Keep both',
+    size: 'Size', sizeTitle: 'Size: {0}', sizeTotal: 'Size', filesN: 'Files', foldersN: 'Folders', bytes: 'bytes',
+    counting: 'Calculating…', unreadable: 'Items that could not be read: {0}', close: 'Close',
+    gone: 'Folder "{0}" no longer exists.', offline: 'No connection to the server',
     sameFolder: 'The destination folder is the same as the source.', intoSelf: 'Cannot move a folder into itself.',
   },
 };
@@ -93,7 +99,7 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.statusText || 'HTTP ' + r.status);
+  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText || 'HTTP ' + r.status), { status: r.status });
   return j;
 }
 function toast(msg) {
@@ -105,6 +111,7 @@ function toast(msg) {
 /* ---------- state ---------- */
 const S = {
   path: '/', entries: [], view: [], sel: new Set(), anchor: 0, sort: { key: 'name', desc: false },
+  dirSizes: new Map(), measuring: new Set(), sig: null, loadErr: '', lastLoad: 0, lastDisks: 0, offline: false,
   filter: '', clip: null, disks: [], jobs: [], jobEls: new Map(), prev: new Map(), order: '', drag: null, seq: 0, tick: 0,
 };
 const TEMP = /^\.lfe-\d+-\d+\.part$/;
@@ -121,17 +128,28 @@ function go(p) {
 }
 window.addEventListener('hashchange', () => { S.sel.clear(); S.filter = $('filter').value = ''; load(); });
 
+// load reads the current folder. keep=true is a background refresh: it never
+// shows errors and does not touch the DOM when nothing has changed, so it can
+// run at any moment without disturbing clicks, selection or scrolling.
 async function load(keep) {
   const p = hashPath(), seq = ++S.seq;
+  let path = p, entries = [], err = '';
+  S.lastLoad = Date.now();
   try {
     const r = await api('GET', '/api/list?path=' + encodeURIComponent(p));
     if (seq !== S.seq) return;
-    S.path = r.path; S.entries = r.entries.filter(e => !TEMP.test(e.name));
+    path = r.path; entries = r.entries.filter(e => !TEMP.test(e.name));
   } catch (e) {
     if (seq !== S.seq) return;
-    if (!keep) toast(e.message);
-    S.path = p; S.entries = [];
+    if (e.status === 404 && p !== '/') { // folder was deleted, moved or its disk unplugged
+      toast(t('gone', p)); S.sig = null; go(parent(p)); return;
+    }
+    if (keep) return; // temporary failure: keep what is on screen
+    toast(e.message); err = e.message;
   }
+  const sig = path + '\n' + JSON.stringify(entries);
+  if (keep && sig === S.sig) return;
+  S.sig = sig; S.path = path; S.entries = entries; S.loadErr = err;
   render();
 }
 
@@ -141,11 +159,12 @@ function typeOf(e) {
   const i = e.name.lastIndexOf('.');
   return i > 0 && i < e.name.length - 1 && e.name.length - i <= 9 ? t('fileExt', e.name.slice(i + 1).toUpperCase()) : t('file');
 }
+const sz = e => e.dir ? S.dirSizes.get(join(S.path, e.name)) ?? -1 : e.size; // measured folder size, if any
 function sortEntries(list) {
   const { key, desc } = S.sort, col = new Intl.Collator(lang, { numeric: true, sensitivity: 'base' });
   const cmp = {
     name: (a, b) => col.compare(a.name, b.name),
-    size: (a, b) => a.size - b.size || col.compare(a.name, b.name),
+    size: (a, b) => sz(a) - sz(b) || col.compare(a.name, b.name),
     mtime: (a, b) => a.mtime - b.mtime,
     type: (a, b) => col.compare(typeOf(a), typeOf(b)) || col.compare(a.name, b.name),
   }[key];
@@ -168,12 +187,12 @@ function render() {
     nm.append(icon(e.dir ? 'folder' : 'file'), el('span', null, e.name));
     const td = el('td'); td.append(nm); td.title = e.name;
     tr.append(td, el('td', 'meta', fmtDate(e.mtime)), el('td', 'meta type', e.link ? `${typeOf(e)} (${t('link')})` : typeOf(e)),
-      el('td', 'meta size', e.dir ? '' : fmtSize(e.size)));
+      el('td', 'meta size', e.dir ? (S.measuring.has(join(S.path, e.name)) ? '…' : sz(e) >= 0 ? fmtSize(sz(e)) : '') : fmtSize(e.size)));
     frag.append(tr);
   });
   $('rows').replaceChildren(frag);
   $('empty').hidden = S.view.length > 0;
-  $('empty').textContent = S.entries.length ? t('noMatch') : t('emptyDir');
+  $('empty').textContent = S.loadErr || (S.entries.length ? t('noMatch') : t('emptyDir'));
 
   document.querySelectorAll('.list th').forEach(th => {
     th.classList.toggle('sorted', th.dataset.sort === S.sort.key);
@@ -227,6 +246,7 @@ function renderNav() {
   for (const d of S.disks) item('disk', d.name, d.path, d);
 }
 async function loadDisks() {
+  S.lastDisks = Date.now();
   try {
     const r = await api('GET', '/api/disks');
     S.disks = r.disks; $('stVer').textContent = 'v' + r.version; renderNav();
@@ -368,6 +388,50 @@ function download() {
   const a = el('a'); a.href = '/api/download?path=' + encodeURIComponent(join(S.path, e.name)); a.download = e.name;
   document.body.append(a); a.click(); a.remove();
 }
+// measure counts the size of the selection (or of the open folder when
+// nothing is selected), showing running totals while the server walks the tree.
+async function measure() {
+  const paths = selPaths().length ? selPaths() : [S.path];
+  const name = paths.length > 1 ? nItems(paths.length) : paths[0] === '/' ? t('computer') : base(paths[0]);
+  const ctl = new AbortController();
+  dialog({ title: t('sizeTitle', name), text: '', buttons: [{ id: 'ok', label: t('close'), primary: true }] }).then(() => ctl.abort());
+  const mine = dlgClose;
+  const busy = on => {
+    paths.forEach(p => on ? S.measuring.add(p) : S.measuring.delete(p));
+    if (dlgClose === mine) { $('dlgBusy').hidden = !on; $('dlgNote').hidden = !on; $('dlgNote').textContent = on ? t('counting') : ''; }
+    render();
+  };
+  busy(true);
+  const show = r => {
+    if (dlgClose !== mine) return;
+    if (!r.done) $('dlgNote').textContent = t('counting') + (r.cur ? ' ' + r.cur : '');
+    $('dlgBody').textContent = `${t('sizeTotal')}: ${fmtSize(r.bytes)} (${num(r.bytes, 0)} ${t('bytes')})\n${t('filesN')}: ${num(r.files, 0)}\n${t('foldersN')}: ${num(r.dirs, 0)}`
+      + (r.errors ? '\n' + t('unreadable', r.errors) : '');
+  };
+  try {
+    const resp = await fetch('/api/size', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-LFE': '1' },
+      body: JSON.stringify({ paths }), signal: ctl.signal,
+    });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'HTTP ' + resp.status);
+    const rd = resp.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      const last = lines.filter(Boolean).pop();
+      if (!last) continue;
+      const r = JSON.parse(last);
+      show(r);
+      if (r.done) paths.forEach((p, i) => S.dirSizes.set(p, r.sizes[i]));
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') { toast(e.message); if (dlgClose === mine) mine(''); }
+  }
+  busy(false);
+}
 function selectAll() { S.view.forEach(e => S.sel.add(e.name)); updateSel(); }
 
 /* ---------- dialog ---------- */
@@ -377,6 +441,7 @@ function dialog({ title, text, input, selectTo, buttons }) {
     const inp = $('dlgInput');
     $('dlgTitle').textContent = title;
     $('dlgBody').textContent = text || '';
+    $('dlgBusy').hidden = $('dlgNote').hidden = true;
     inp.hidden = input == null; inp.value = input ?? '';
     const close = btn => { $('modal').hidden = true; dlgClose = null; resolve({ btn, value: inp.value }); pane.focus(); };
     dlgClose = close;
@@ -427,6 +492,8 @@ pane.addEventListener('contextmenu', ev => {
       null,
       { label: t('rename'), key: 'F2', disabled: !one, run: rename },
       { label: t('delete'), key: 'Del', run: del },
+      null,
+      { label: t('size'), run: measure },
     ]);
   } else {
     S.sel.clear(); updateSel();
@@ -436,6 +503,7 @@ pane.addEventListener('contextmenu', ev => {
       null,
       { label: t('selectAll'), key: 'Ctrl+A', run: selectAll },
       { label: t('refresh'), run: () => { load(); loadDisks(); } },
+      { label: t('size'), run: measure },
     ]);
   }
 });
@@ -513,9 +581,9 @@ function updateJob(c, j) {
       stat(r.stats, t('speed'), fmtSize(j.speed) + t('perSec'));
       if (j.speed > 0 && byBytes) stat(r.stats, t('left'), fmtDur((j.totalBytes - j.doneBytes) / j.speed));
     }
-    stat(r.stats, t('elapsed'), fmtDur((Date.now() - j.started) / 1000));
+    stat(r.stats, t('elapsed'), fmtDur(j.elapsed / 1000));
   } else if (fin && j.started) {
-    const secs = Math.max((j.finished - j.started) / 1000, 0.001);
+    const secs = Math.max(j.elapsed / 1000, 0.001);
     if (byBytes) stat(r.stats, t('total'), j.state === 'done' ? fmtSize(j.totalBytes) : t('of', fmtSize(j.doneBytes), fmtSize(j.totalBytes)));
     if (j.totalFiles) stat(r.stats, t('files'), filesStr);
     stat(r.stats, t('took'), fmtDur(secs));
@@ -542,23 +610,45 @@ function renderJobs() {
   $('opsSummary').textContent = nRun + nQ ? t('opsActive', nRun, nQ) : '';
   $('opsClear').hidden = !list.some(j => !active(j));
 }
-let pollTimer = 0;
+function setOffline(off) {
+  S.offline = off;
+  $('stNet').textContent = off ? t('offline') : '';
+}
+// Returning to the tab: show the current state at once instead of a stale one.
+const wake = () => { if (!document.hidden) { poll(); if (!dlgClose && !S.drag) load(true); loadDisks(); } };
+document.addEventListener('visibilitychange', wake);
+window.addEventListener('focus', wake);
+let pollTimer = 0, pollGen = 0, polled = false;
 async function poll() {
   clearTimeout(pollTimer);
+  const gen = ++pollGen;
   try {
-    S.jobs = (await api('GET', '/api/jobs')).jobs;
+    const jobs = (await api('GET', '/api/jobs')).jobs;
+    if (gen !== pollGen) return; // a newer poll is already running
+    S.jobs = jobs;
     let finishedNow = false;
     for (const j of S.jobs) {
-      if (!active(j) && active({ state: S.prev.get(j.id) || j.state })) finishedNow = true;
+      // A job counts as "just finished" when we saw it active before, or when
+      // it is new to us and already done (instant moves finish before the
+      // first poll ever sees them running).
+      const before = S.prev.get(j.id);
+      if (!active(j) && (before ? active({ state: before }) : polled)) finishedNow = true;
       S.prev.set(j.id, j.state);
     }
+    polled = true;
+    if (finishedNow && S.dirSizes.size) { S.dirSizes.clear(); S.sig = null; } // sizes are stale after any operation
     renderJobs();
     const run = S.jobs.find(j => j.state === 'running');
     S.tick++;
     const touches = run && (run.dest === S.path || run.sources.some(s => parent(s) === S.path));
-    if (finishedNow || (touches && S.tick % 5 === 0 && !S.drag && !dlgClose && menu.hidden)) load(true);
-    if (finishedNow || (run && S.tick % 10 === 0)) loadDisks();
-  } catch { /* server unreachable: keep trying */ }
+    // Background refresh: often while a job writes into the open folder,
+    // rarely otherwise (to pick up changes made by other tabs or programs).
+    const now = Date.now(), wasOffline = S.offline, quiet = !S.drag && !dlgClose && menu.hidden && !document.hidden;
+    setOffline(false);
+    if (finishedNow || wasOffline || (quiet && now - S.lastLoad > (touches ? 4000 : 15000))) load(true);
+    if (finishedNow || wasOffline || (!document.hidden && now - S.lastDisks > (run ? 10000 : 30000))) loadDisks();
+  } catch { if (gen === pollGen) setOffline(true); }
+  if (gen !== pollGen) return;
   pollTimer = setTimeout(poll, S.jobs.some(active) ? 1000 : 4000);
 }
 
@@ -590,6 +680,7 @@ $('tbPaste').onclick = paste;
 $('tbRename').onclick = rename;
 $('tbDelete').onclick = del;
 $('tbDownload').onclick = download;
+$('tbSize').onclick = measure;
 $('filter').oninput = ev => { S.filter = ev.target.value; render(); };
 $('opsToggle').onclick = () => $('ops').classList.toggle('collapsed');
 $('opsClear').onclick = async () => { try { await api('POST', '/api/jobs/clear'); } catch (e) { toast(e.message); } poll(); };

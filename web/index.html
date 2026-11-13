@@ -28,6 +28,7 @@
   <button id="tbDelete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg><span data-t="delete"></span></button>
   <span class="sep"></span>
   <button id="tbDownload"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><span data-t="download"></span></button>
+  <button id="tbSize"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6"/></svg><span data-t="size"></span></button>
 </div>
 
 <main>
@@ -61,13 +62,14 @@
   <span id="stCount"></span>
   <span id="stSel"></span>
   <span id="stClip"></span>
+  <span id="stNet" class="net"></span>
   <span class="grow"></span>
   <span id="stVer" class="muted"></span>
   <button id="btnLang" class="link"></button>
 </footer>
 
 <div id="menu" class="menu" hidden></div>
-<div id="modal" class="modal" hidden><div class="dlg"><h3 id="dlgTitle"></h3><div id="dlgBody"></div><input id="dlgInput" type="text" autocomplete="off" spellcheck="false"><div id="dlgBtns" class="dlg-btns"></div></div></div>
+<div id="modal" class="modal" hidden><div class="dlg"><h3 id="dlgTitle"></h3><div id="dlgBody"></div><div id="dlgBusy" class="busy" hidden><b></b></div><div id="dlgNote" class="note" hidden></div><input id="dlgInput" type="text" autocomplete="off" spellcheck="false"><div id="dlgBtns" class="dlg-btns"></div></div></div>
 <div id="toasts" class="toasts"></div>
 <script src="app.js"></script>
 </body>

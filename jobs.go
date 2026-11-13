@@ -60,6 +60,7 @@ type jobView struct {
 	Created    int64    `json:"created"`
 	Started    int64    `json:"started"`
 	Finished   int64    `json:"finished"`
+	Elapsed    int64    `json:"elapsed"` // ms, measured by the server clock
 }
 
 func ms(t time.Time) int64 {
@@ -79,6 +80,11 @@ func (j *Job) view() jobView {
 		TotalFiles: j.totalFiles.Load(), DoneFiles: j.doneFiles.Load(),
 		Errors: append([]string{}, j.errors...), ErrCount: j.errCount,
 		Created: ms(j.Created), Started: ms(j.started), Finished: ms(j.finished),
+	}
+	if !j.finished.IsZero() && !j.started.IsZero() {
+		v.Elapsed = j.finished.Sub(j.started).Milliseconds()
+	} else if !j.started.IsZero() {
+		v.Elapsed = time.Since(j.started).Milliseconds()
 	}
 	if c := j.current.Load(); c != nil {
 		v.Current = *c
