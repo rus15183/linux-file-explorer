@@ -18,13 +18,14 @@ const (
 	maxFinished = 100 // finished jobs kept in the list
 )
 
-// Job is one queued operation: copy, move or delete.
+// Job is one queued operation: copy, move, delete or zip.
 type Job struct {
 	ID       int64
 	Op       string
 	Sources  []string // virtual paths
 	Dest     string   // virtual path
 	Conflict string
+	TZ       int // browser UTC offset, minutes: zip stores local file times
 	Created  time.Time
 
 	mu       sync.Mutex
@@ -132,10 +133,10 @@ func newQueue(app *App) *Queue {
 	return &Queue{app: app, wake: make(chan struct{}, 1)}
 }
 
-func (q *Queue) add(op string, sources []string, dest, conflict string) *Job {
+func (q *Queue) add(op string, sources []string, dest, conflict string, tz int) *Job {
 	q.mu.Lock()
 	q.nextID++
-	j := &Job{ID: q.nextID, Op: op, Sources: sources, Dest: dest, Conflict: conflict,
+	j := &Job{ID: q.nextID, Op: op, Sources: sources, Dest: dest, Conflict: conflict, TZ: tz,
 		Created: time.Now(), state: stQueued}
 	q.jobs = append(q.jobs, j)
 	// Drop the oldest finished jobs beyond the limit.
@@ -309,6 +310,8 @@ func (q *Queue) exec(j *Job, ctx context.Context) {
 	var err error
 	if j.Op == "delete" {
 		err = r.runDelete()
+	} else if j.Op == "zip" {
+		err = r.runZip()
 	} else {
 		err = r.runTransfer()
 	}

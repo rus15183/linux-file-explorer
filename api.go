@@ -365,6 +365,8 @@ type jobReq struct {
 	Sources  []string `json:"sources"`
 	Dest     string   `json:"dest"`
 	Conflict string   `json:"conflict"`
+	Name     string   `json:"name"` // zip: archive file name
+	TZ       int      `json:"tz"`   // zip: browser UTC offset in minutes
 }
 
 // hCheck reports which source names already exist in the destination.
@@ -400,7 +402,7 @@ func (a *App) hCreateJob(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.Op != "copy" && req.Op != "move" && req.Op != "delete" {
+	if req.Op != "copy" && req.Op != "move" && req.Op != "delete" && req.Op != "zip" {
 		badRequest(w, "invalid operation")
 		return
 	}
@@ -433,9 +435,26 @@ func (a *App) hCreateJob(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, "destination is not a directory")
 			return
 		}
+		if req.Op == "zip" {
+			name := strings.TrimSpace(req.Name)
+			if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
+				badRequest(w, "invalid archive name")
+				return
+			}
+			if !strings.HasSuffix(strings.ToLower(name), ".zip") {
+				name += ".zip"
+			}
+			p = filepath.Join(p, name)
+			if _, err := os.Lstat(p); err == nil {
+				p = uniqueName(p, false)
+			}
+		}
 		dest = a.virt(p)
 	}
-	j := a.q.add(req.Op, srcs, dest, req.Conflict)
+	if req.TZ < -14*60 || req.TZ > 14*60 {
+		req.TZ = 0
+	}
+	j := a.q.add(req.Op, srcs, dest, req.Conflict, req.TZ)
 	writeJSON(w, 200, j.view())
 }
 

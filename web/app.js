@@ -15,7 +15,7 @@ const L = {
     clipCopy: 'В буфере (копирование): {0}', clipMove: 'В буфере (перемещение): {0}',
     ops: 'Операции', opsEmpty: 'Нет операций. Скопируйте или переместите файлы — операции появятся здесь и будут выполняться по очереди.',
     opsActive: 'выполняется: {0}, в очереди: {1}', clearDone: 'Очистить завершённые',
-    opCopy: 'Копирование', opMove: 'Перемещение', opDelete: 'Удаление',
+    opCopy: 'Копирование', opMove: 'Перемещение', opDelete: 'Удаление', opZip: 'Сжатие', zip: 'Сжать в ZIP', zipTitle: 'Сжать в ZIP-архив', zipName: 'Архив',
     queued: 'В очереди', scan: 'Подсчёт…', sync: 'Сброс на диск…', done: 'Готово', doneErr: 'Готово, ошибок: {0}',
     failed: 'Ошибка', canceled: 'Отменено', cancel: 'Отмена', remove: 'Убрать', pause: 'Пауза', resume: 'Продолжить', paused: 'Пауза',
     of: '{0} из {1}', speed: 'Скорость', left: 'Осталось', elapsed: 'Прошло', total: 'Всего', took: 'Время', avg: 'Средняя скорость',
@@ -44,7 +44,7 @@ const L = {
     clipCopy: 'Clipboard (copy): {0}', clipMove: 'Clipboard (move): {0}',
     ops: 'Operations', opsEmpty: 'No operations. Copy or move files — operations appear here and run one after another.',
     opsActive: 'running: {0}, queued: {1}', clearDone: 'Clear finished',
-    opCopy: 'Copying', opMove: 'Moving', opDelete: 'Deleting',
+    opCopy: 'Copying', opMove: 'Moving', opDelete: 'Deleting', opZip: 'Compressing', zip: 'Compress to ZIP', zipTitle: 'Compress to ZIP archive', zipName: 'Archive',
     queued: 'Queued', scan: 'Calculating…', sync: 'Flushing to disk…', done: 'Done', doneErr: 'Done, errors: {0}',
     failed: 'Failed', canceled: 'Canceled', cancel: 'Cancel', remove: 'Dismiss', pause: 'Pause', resume: 'Resume', paused: 'Paused',
     of: '{0} of {1}', speed: 'Speed', left: 'Time left', elapsed: 'Elapsed', total: 'Total', took: 'Time', avg: 'Average speed',
@@ -216,6 +216,7 @@ function updateSel() {
 function updateUI() {
   const n = S.sel.size, one = n === 1 ? S.view.find(e => S.sel.has(e.name)) : null;
   $('tbCut').disabled = $('tbCopy').disabled = $('tbDelete').disabled = n === 0;
+  $('tbZip').disabled = n === 0 || S.path === '/';
   $('tbRename').disabled = n !== 1;
   $('tbDownload').disabled = !one || one.dir;
   $('tbPaste').disabled = !S.clip;
@@ -390,6 +391,25 @@ async function del() {
     $('ops').classList.remove('collapsed'); poll();
   } catch (e) { toast(e.message); }
 }
+// zip queues a job that packs the selection into one archive in the open folder.
+async function zip() {
+  const paths = selPaths(); if (!paths.length || S.path === '/') return;
+  const one = paths.length === 1 ? S.view.find(e => S.sel.has(e.name)) : null;
+  const dot = one && !one.dir ? one.name.lastIndexOf('.') : -1;
+  const stem = one ? (dot > 0 ? one.name.slice(0, dot) : one.name) : base(S.path) || t('zipName');
+  const taken = new Set(S.entries.map(e => e.name.toLowerCase()));
+  let name = stem + '.zip';
+  for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${stem} (${i}).zip`;
+  const r = await dialog({
+    title: t('zipTitle'), text: paths.length === 1 ? base(paths[0]) : nItems(paths.length), input: name, selectTo: name.length - 4,
+    buttons: [{ id: 'ok', label: t('ok'), primary: true }, { id: '', label: t('cancel') }],
+  });
+  if (!r || !r.btn || !r.value.trim()) return;
+  try {
+    await api('POST', '/api/jobs', { op: 'zip', sources: paths, dest: S.path, name: r.value.trim(), tz: -new Date().getTimezoneOffset() });
+    $('ops').classList.remove('collapsed'); poll();
+  } catch (e) { toast(e.message); }
+}
 function download() {
   const e = S.sel.size === 1 && S.view.find(x => S.sel.has(x.name));
   if (!e || e.dir) return;
@@ -513,6 +533,7 @@ pane.addEventListener('contextmenu', ev => {
       null,
       { label: t('rename'), key: 'F2', disabled: !one, run: rename },
       { label: t('delete'), key: 'Del', run: del },
+      { label: t('zip'), disabled: S.path === '/', run: zip },
       null,
       { label: t('props'), key: t('spaceKey'), run: measure },
     ]);
@@ -557,7 +578,7 @@ document.addEventListener('keydown', ev => {
 });
 
 /* ---------- operations panel ---------- */
-const OPN = { copy: 'opCopy', move: 'opMove', delete: 'opDelete' };
+const OPN = { copy: 'opCopy', move: 'opMove', delete: 'opDelete', zip: 'opZip' };
 const active = j => j.state === 'queued' || j.state === 'running';
 function jobCard(j) {
   const c = el('div', 'job'), r = {};
@@ -718,6 +739,7 @@ $('tbPaste').onclick = paste;
 $('tbRename').onclick = rename;
 $('tbDelete').onclick = del;
 $('tbDownload').onclick = download;
+$('tbZip').onclick = zip;
 $('tbSize').onclick = measure;
 $('filter').oninput = ev => { S.filter = ev.target.value; render(); };
 $('opsToggle').onclick = () => $('ops').classList.toggle('collapsed');
