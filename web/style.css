@@ -105,6 +105,8 @@ main { flex: 1; display: flex; min-height: 0; }
 .job .title b { font-weight: 600; }
 .job .badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--hover); color: var(--muted); white-space: nowrap; }
 .job.running .badge { background: var(--accent); color: var(--accent-text); }
+.job.paused .badge { background: var(--hover); color: var(--text); }
+.job.paused .track b { background: var(--muted); }
 .job.done .badge { color: var(--ok); }
 .job.failed .badge, .job.haserr .badge { color: var(--danger); }
 .job .act { padding: 3px 12px; border: 1px solid var(--line); background: var(--panel); }

@@ -30,6 +30,8 @@ func (a *App) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/jobs", a.hCreateJob)
 	mux.HandleFunc("POST /api/jobs/clear", a.hClear)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", a.hCancel)
+	mux.HandleFunc("POST /api/jobs/{id}/pause", a.hPause)
+	mux.HandleFunc("POST /api/jobs/{id}/resume", a.hPause)
 	mux.HandleFunc("DELETE /api/jobs/{id}", a.hRemove)
 }
 
@@ -444,6 +446,12 @@ func (a *App) hJobs(w http.ResponseWriter, r *http.Request) {
 func (a *App) hCancel(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	a.q.cancel(id)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (a *App) hPause(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	a.q.setPaused(id, strings.HasSuffix(r.URL.Path, "/pause"))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

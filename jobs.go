@@ -37,6 +37,12 @@ type Job struct {
 	speed    float64
 	cancel   context.CancelFunc
 
+	paused    bool
+	resume    chan struct{} // closed when the pause ends
+	pausedAt  time.Time     // start of the current pause of a running job
+	pausedFor time.Duration // finished pauses, excluded from the elapsed time
+	pauseFlag atomic.Bool   // mirrors paused: lock-free check in the copy loop
+
 	totalBytes, doneBytes atomic.Int64
 	totalFiles, doneFiles atomic.Int64
 	current               atomic.Pointer[string]
@@ -60,7 +66,8 @@ type jobView struct {
 	Created    int64    `json:"created"`
 	Started    int64    `json:"started"`
 	Finished   int64    `json:"finished"`
-	Elapsed    int64    `json:"elapsed"` // ms, measured by the server clock
+	Elapsed    int64    `json:"elapsed"` // ms, measured by the server clock, pauses excluded
+	Paused     bool     `json:"paused"`
 }
 
 func ms(t time.Time) int64 {
@@ -81,10 +88,15 @@ func (j *Job) view() jobView {
 		Errors: append([]string{}, j.errors...), ErrCount: j.errCount,
 		Created: ms(j.Created), Started: ms(j.started), Finished: ms(j.finished),
 	}
-	if !j.finished.IsZero() && !j.started.IsZero() {
-		v.Elapsed = j.finished.Sub(j.started).Milliseconds()
-	} else if !j.started.IsZero() {
-		v.Elapsed = time.Since(j.started).Milliseconds()
+	v.Paused = j.paused
+	if !j.started.IsZero() {
+		end := time.Now()
+		if !j.finished.IsZero() {
+			end = j.finished
+		} else if j.paused {
+			end = j.pausedAt
+		}
+		v.Elapsed = (end.Sub(j.started) - j.pausedFor).Milliseconds()
 	}
 	if c := j.current.Load(); c != nil {
 		v.Current = *c
@@ -145,10 +157,7 @@ func (q *Queue) add(op string, sources []string, dest, conflict string) *Job {
 		q.jobs = kept
 	}
 	q.mu.Unlock()
-	select {
-	case q.wake <- struct{}{}:
-	default:
-	}
+	q.kick()
 	return j
 }
 
@@ -191,8 +200,63 @@ func (q *Queue) cancel(id int64) {
 	case stQueued:
 		j.state = stCanceled
 		j.finished = time.Now()
+		j.paused = false
+		j.pauseFlag.Store(false)
 	case stRunning:
 		j.cancel()
+	}
+}
+
+// setPaused pauses or resumes a queued or running job. A paused running job
+// keeps its place: the queue waits for it. A paused queued job is skipped
+// until it is resumed.
+func (q *Queue) setPaused(id int64, on bool) {
+	j := q.find(id)
+	if j == nil {
+		return
+	}
+	j.mu.Lock()
+	if (j.state == stQueued || j.state == stRunning) && j.paused != on {
+		j.paused = on
+		j.pauseFlag.Store(on)
+		if on {
+			j.resume = make(chan struct{})
+			j.pausedAt = time.Now()
+			j.speed = 0
+		} else {
+			close(j.resume)
+			if j.state == stRunning {
+				j.pausedFor += time.Since(j.pausedAt)
+			}
+		}
+	}
+	j.mu.Unlock()
+	if !on {
+		q.kick()
+	}
+}
+
+func (q *Queue) kick() {
+	select {
+	case q.wake <- struct{}{}:
+	default:
+	}
+}
+
+// gate blocks while the job is paused; canceling the job ends the wait.
+func (j *Job) gate(ctx context.Context) {
+	for j.pauseFlag.Load() {
+		j.mu.Lock()
+		ch, on := j.resume, j.paused
+		j.mu.Unlock()
+		if !on {
+			return
+		}
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -215,7 +279,7 @@ func (q *Queue) next() (*Job, context.Context) {
 	defer q.mu.Unlock()
 	for _, j := range q.jobs {
 		j.mu.Lock()
-		if j.state == stQueued {
+		if j.state == stQueued && !j.paused {
 			ctx, cancel := context.WithCancel(context.Background())
 			j.state, j.started, j.cancel = stRunning, time.Now(), cancel
 			j.mu.Unlock()
@@ -262,6 +326,11 @@ func (q *Queue) exec(j *Job, ctx context.Context) {
 		j.state = stDone
 	}
 	j.finished, j.speed, j.phase = time.Now(), 0, ""
+	if j.paused { // canceled while paused
+		j.paused = false
+		j.pauseFlag.Store(false)
+		j.pausedFor += j.finished.Sub(j.pausedAt)
+	}
 	j.cancel()
 	j.mu.Unlock()
 	j.current.Store(nil)
@@ -278,7 +347,14 @@ func (j *Job) sampleSpeed(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
+			if j.pauseFlag.Load() { // start the average afresh after a pause
+				samples = samples[:0]
+				continue
+			}
 			samples = append(samples, j.doneBytes.Load())
+			if len(samples) < 2 {
+				continue
+			}
 			if len(samples) > window+1 {
 				samples = samples[1:]
 			}

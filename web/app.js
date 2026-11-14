@@ -17,7 +17,7 @@ const L = {
     opsActive: 'выполняется: {0}, в очереди: {1}', clearDone: 'Очистить завершённые',
     opCopy: 'Копирование', opMove: 'Перемещение', opDelete: 'Удаление',
     queued: 'В очереди', scan: 'Подсчёт…', sync: 'Сброс на диск…', done: 'Готово', doneErr: 'Готово, ошибок: {0}',
-    failed: 'Ошибка', canceled: 'Отменено', cancel: 'Отмена', remove: 'Убрать',
+    failed: 'Ошибка', canceled: 'Отменено', cancel: 'Отмена', remove: 'Убрать', pause: 'Пауза', resume: 'Продолжить', paused: 'Пауза',
     of: '{0} из {1}', speed: 'Скорость', left: 'Осталось', elapsed: 'Прошло', total: 'Всего', took: 'Время', avg: 'Средняя скорость',
     errors: 'Ошибки ({0})', sec: 'с', min: 'мин', hour: 'ч', perSec: '/с',
     units: ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ', 'ПБ'],
@@ -45,7 +45,7 @@ const L = {
     opsActive: 'running: {0}, queued: {1}', clearDone: 'Clear finished',
     opCopy: 'Copying', opMove: 'Moving', opDelete: 'Deleting',
     queued: 'Queued', scan: 'Calculating…', sync: 'Flushing to disk…', done: 'Done', doneErr: 'Done, errors: {0}',
-    failed: 'Failed', canceled: 'Canceled', cancel: 'Cancel', remove: 'Dismiss',
+    failed: 'Failed', canceled: 'Canceled', cancel: 'Cancel', remove: 'Dismiss', pause: 'Pause', resume: 'Resume', paused: 'Paused',
     of: '{0} of {1}', speed: 'Speed', left: 'Time left', elapsed: 'Elapsed', total: 'Total', took: 'Time', avg: 'Average speed',
     errors: 'Errors ({0})', sec: 's', min: 'min', hour: 'h', perSec: '/s',
     units: ['B', 'KB', 'MB', 'GB', 'TB', 'PB'],
@@ -556,8 +556,8 @@ const active = j => j.state === 'queued' || j.state === 'running';
 function jobCard(j) {
   const c = el('div', 'job'), r = {};
   const top = el('div', 'top');
-  r.title = el('div', 'title'); r.badge = el('span', 'badge'); r.act = el('button', 'act');
-  top.append(r.title, r.badge, r.act);
+  r.title = el('div', 'title'); r.badge = el('span', 'badge'); r.act = el('button', 'act'); r.pause = el('button', 'act');
+  top.append(r.title, r.badge, r.pause, r.act);
   const prog = el('div', 'prog'), track = el('div', 'track');
   r.bar = el('b'); track.append(r.bar); r.pct = el('span', 'pct'); prog.append(track, r.pct);
   r.stats = el('div', 'stats'); r.cur = el('div', 'cur');
@@ -570,6 +570,10 @@ function jobCard(j) {
     try { await api(active(c._j) ? 'POST' : 'DELETE', `/api/jobs/${j.id}` + (active(c._j) ? '/cancel' : '')); } catch (e) { toast(e.message); }
     poll();
   };
+  r.pause.onclick = async () => {
+    try { await api('POST', `/api/jobs/${j.id}/` + (c._j.paused ? 'resume' : 'pause')); } catch (e) { toast(e.message); }
+    poll();
+  };
   c._r = r;
   return c;
 }
@@ -578,14 +582,15 @@ function stat(parent_, label, value) {
 }
 function updateJob(c, j) {
   const r = c._r; c._j = j;
-  const run = j.state === 'running', fin = !active(j);
+  const fin = !active(j), held = !fin && j.paused, run = j.state === 'running' && !held;
   const byBytes = j.totalBytes > 0;
   let frac = byBytes ? j.doneBytes / j.totalBytes : j.totalFiles > 0 ? j.doneFiles / j.totalFiles : 0;
   frac = j.state === 'done' ? 1 : Math.max(0, Math.min(1, frac));
-  c.className = 'job ' + j.state + (j.errCount ? ' haserr' : '') + (run && (j.phase === 'scan' || j.phase === 'sync') ? ' indet' : '');
-  r.badge.textContent = run ? (j.phase === 'scan' || j.phase === 'sync' ? t(j.phase) : t(OPN[j.op]))
+  c.className = 'job ' + j.state + (held ? ' paused' : '') + (j.errCount ? ' haserr' : '') + (run && (j.phase === 'scan' || j.phase === 'sync') ? ' indet' : '');
+  r.badge.textContent = held ? t('paused') : run ? (j.phase === 'scan' || j.phase === 'sync' ? t(j.phase) : t(OPN[j.op]))
     : j.state === 'done' ? (j.errCount ? t('doneErr', j.errCount) : t('done')) : t(j.state);
   r.act.textContent = fin ? t('remove') : t('cancel');
+  r.pause.hidden = fin; r.pause.textContent = held ? t('resume') : t('pause');
   r.bar.style.width = (frac * 100).toFixed(1) + '%';
   r.pct.textContent = j.state === 'queued' ? '' : Math.floor(frac * 100) + '%';
 
@@ -598,6 +603,10 @@ function updateJob(c, j) {
       stat(r.stats, t('speed'), fmtSize(j.speed) + t('perSec'));
       if (j.speed > 0 && byBytes) stat(r.stats, t('left'), fmtDur((j.totalBytes - j.doneBytes) / j.speed));
     }
+    stat(r.stats, t('elapsed'), fmtDur(j.elapsed / 1000));
+  } else if (held && j.started) {
+    if (byBytes) stat(r.stats, '', t('of', fmtSize(j.doneBytes), fmtSize(j.totalBytes)));
+    if (j.totalFiles) stat(r.stats, t('files'), filesStr);
     stat(r.stats, t('elapsed'), fmtDur(j.elapsed / 1000));
   } else if (fin && j.started) {
     const secs = Math.max(j.elapsed / 1000, 0.001);

@@ -40,6 +40,13 @@ type runner struct {
 	wrote    bool // some data was actually copied (worth a final syncfs)
 }
 
+// check is called between files and between chunks of a file: it waits while
+// the job is paused and reports cancellation.
+func (r *runner) check() error {
+	r.job.gate(r.ctx)
+	return r.ctx.Err()
+}
+
 func (r *runner) addErr(realPath string, err error) {
 	r.job.addErr(r.app.virt(realPath) + ": " + errMsg(err))
 }
@@ -67,7 +74,7 @@ func (r *runner) runTransfer() error {
 	// Plan: resolve name conflicts and try an instant rename for moves.
 	var items []item
 	for _, vs := range j.Sources {
-		if err := r.ctx.Err(); err != nil {
+		if err := r.check(); err != nil {
 			return err
 		}
 		src, err := r.app.resolve(vs)
@@ -150,7 +157,7 @@ func (r *runner) runTransfer() error {
 
 // scan adds the size of a tree to the job totals.
 func (r *runner) scan(p string, info fs.FileInfo, countDirs bool) error {
-	if err := r.ctx.Err(); err != nil {
+	if err := r.check(); err != nil {
 		return err
 	}
 	j := r.job
@@ -180,7 +187,7 @@ func (r *runner) scan(p string, info fs.FileInfo, countDirs bool) error {
 // transfer copies (or moves) one tree. It returns an error only on cancel;
 // per-file failures are recorded in the job and the walk continues.
 func (r *runner) transfer(src, dst string, info fs.FileInfo, check bool) error {
-	if err := r.ctx.Err(); err != nil {
+	if err := r.check(); err != nil {
 		return err
 	}
 	j := r.job
@@ -266,7 +273,7 @@ func (r *runner) transfer(src, dst string, info fs.FileInfo, check bool) error {
 	case mode.IsRegular():
 		n, err := r.copyFile(src, dst, info)
 		if err != nil {
-			if cerr := r.ctx.Err(); cerr != nil {
+			if cerr := r.check(); cerr != nil {
 				return cerr
 			}
 			r.addErr(src, err)
@@ -363,7 +370,7 @@ func (r *runner) pump(in, out *os.File, size int64) (int64, error) {
 	var buf []byte
 
 	for {
-		if err := r.ctx.Err(); err != nil {
+		if err := r.check(); err != nil {
 			return off, err
 		}
 		var n int
@@ -483,7 +490,7 @@ func (r *runner) runDelete() error {
 }
 
 func (r *runner) remove(p string, info fs.FileInfo) error {
-	if err := r.ctx.Err(); err != nil {
+	if err := r.check(); err != nil {
 		return err
 	}
 	j := r.job
