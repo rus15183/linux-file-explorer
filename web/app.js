@@ -26,6 +26,7 @@ const L = {
     conflictTitle: 'Замена или пропуск файлов', conflictText: 'В папке назначения «{1}» уже есть элементы с такими именами ({0}):',
     andMore: '…и ещё {0}', replace: 'Заменить', skip: 'Пропустить', keepBoth: 'Сохранить оба',
     props: 'Свойства', propsTitle: 'Свойства: {0}', sizeTotal: 'Размер', filesN: 'Файлов', foldersN: 'Папок', bytes: 'байт',
+    showHidden: 'Показывать скрытые файлы', hiddenN: 'скрыто: {0}',
     spaceKey: 'Пробел', pType: 'Тип', pWhere: 'Расположение', pCreated: 'Создан', pModified: 'Изменён', pItems: 'Элементов', pUnknown: 'неизвестно',
     counting: 'Идёт подсчёт…', unreadable: 'Не удалось прочитать элементов: {0}', close: 'Закрыть',
     gone: 'Папка «{0}» больше не существует.', offline: 'Нет связи с сервером',
@@ -54,13 +55,15 @@ const L = {
     conflictTitle: 'Replace or skip files', conflictText: 'The destination "{1}" already has items with these names ({0}):',
     andMore: '…and {0} more', replace: 'Replace', skip: 'Skip', keepBoth: 'Keep both',
     props: 'Properties', propsTitle: 'Properties: {0}', sizeTotal: 'Size', filesN: 'Files', foldersN: 'Folders', bytes: 'bytes',
+    showHidden: 'Show hidden files', hiddenN: '{0} hidden',
     spaceKey: 'Space', pType: 'Type', pWhere: 'Location', pCreated: 'Created', pModified: 'Modified', pItems: 'Items', pUnknown: 'unknown',
     counting: 'Calculating…', unreadable: 'Items that could not be read: {0}', close: 'Close',
     gone: 'Folder "{0}" no longer exists.', offline: 'No connection to the server',
     sameFolder: 'The destination folder is the same as the source.', intoSelf: 'Cannot move a folder into itself.',
   },
 };
-let lang = localStorage.getItem('lfeLang') || ((navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en');
+let lang = localStorage.getItem('lfeLang') === 'en' ? 'en' : 'ru'; // Russian unless English was chosen
+let showHidden = localStorage.getItem('lfeHidden') === '1'; // dot-files are hidden by default
 const t = (k, ...a) => String(L[lang][k] ?? k).replace(/\{(\d)\}/g, (_, i) => a[i]);
 function plural(n, forms) {
   if (lang !== 'ru') return n === 1 ? forms[0] : forms[1];
@@ -175,7 +178,9 @@ function sortEntries(list) {
 }
 function render() {
   const f = S.filter.toLowerCase();
-  S.view = sortEntries(S.entries.filter(e => !f || e.name.toLowerCase().includes(f)));
+  const shown = showHidden ? S.entries : S.entries.filter(e => !e.name.startsWith('.'));
+  S.hidden = S.entries.length - shown.length;
+  S.view = sortEntries(shown.filter(e => !f || e.name.toLowerCase().includes(f)));
   const names = new Set(S.view.map(e => e.name));
   for (const n of [...S.sel]) if (!names.has(n)) S.sel.delete(n);
   const cut = S.clip && S.clip.op === 'move' ? new Set(S.clip.paths) : null;
@@ -195,7 +200,7 @@ function render() {
   });
   $('rows').replaceChildren(frag);
   $('empty').hidden = S.view.length > 0;
-  $('empty').textContent = S.loadErr || (S.entries.length ? t('noMatch') : t('emptyDir'));
+  $('empty').textContent = S.loadErr || (f && shown.length ? t('noMatch') : t('emptyDir'));
 
   document.querySelectorAll('.list th').forEach(th => {
     th.classList.toggle('sorted', th.dataset.sort === S.sort.key);
@@ -215,7 +220,7 @@ function updateUI() {
   $('tbDownload').disabled = !one || one.dir;
   $('tbPaste').disabled = !S.clip;
   $('btnUp').disabled = S.path === '/';
-  $('stCount').textContent = nItems(S.view.length);
+  $('stCount').textContent = nItems(S.view.length) + (S.hidden ? ` (${t('hiddenN', S.hidden)})` : '');
   const size = S.view.filter(e => S.sel.has(e.name) && !e.dir).reduce((a, e) => a + e.size, 0);
   $('stSel').textContent = n ? t('selected', nItems(n)) + (size ? ` · ${fmtSize(size)}` : '') : '';
   $('stClip').textContent = S.clip ? t(S.clip.op === 'move' ? 'clipMove' : 'clipCopy', nItems(S.clip.paths.length)) : '';
@@ -519,6 +524,7 @@ pane.addEventListener('contextmenu', ev => {
       null,
       { label: t('selectAll'), key: 'Ctrl+A', run: selectAll },
       { label: t('refresh'), run: () => { load(); loadDisks(); } },
+      { label: (showHidden ? '✓ ' : '') + t('showHidden'), run: () => setHidden(!showHidden) },
       { label: t('props'), key: t('spaceKey'), run: measure },
     ]);
   }
@@ -694,6 +700,12 @@ function applyLang() {
   S.jobEls.clear(); S.order = '';
   render(); renderJobs();
 }
+function setHidden(on) {
+  showHidden = on; localStorage.setItem('lfeHidden', on ? '1' : '0');
+  $('chkHidden').checked = on; render(); pane.focus();
+}
+$('chkHidden').checked = showHidden;
+$('chkHidden').onchange = ev => setHidden(ev.target.checked);
 $('btnLang').onclick = () => { lang = lang === 'ru' ? 'en' : 'ru'; localStorage.setItem('lfeLang', lang); applyLang(); };
 $('btnBack').onclick = () => history.back();
 $('btnFwd').onclick = () => history.forward();

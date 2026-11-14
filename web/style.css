@@ -129,6 +129,8 @@ main { flex: 1; display: flex; min-height: 0; }
 /* status bar */
 .status { display: flex; gap: 16px; align-items: center; padding: 3px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 
+.status .chk { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.status .chk input { margin: 0; accent-color: var(--accent); }
 .status .net { color: var(--danger); font-weight: 600; }
 
 /* menu, dialog, toasts */
