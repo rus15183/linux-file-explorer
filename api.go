@@ -261,9 +261,11 @@ type sizeResult struct {
 	Done   bool    `json:"done"`
 	Cur    string  `json:"cur,omitempty"`   // folder being scanned right now
 	Sizes  []int64 `json:"sizes,omitempty"` // per requested path, in the final line
+	Mtime  int64   `json:"mtime,omitempty"` // modified, ms; only when one path is requested
+	Btime  int64   `json:"btime,omitempty"` // created, ms; 0 when the filesystem does not keep it
 }
 
-// hSize measures files and folders. It runs outside the job queue (it only
+// hSize backs the Properties dialog: it measures files and folders. It runs outside the job queue (it only
 // reads) and streams running totals as JSON lines, so the UI shows progress.
 // Closing the dialog aborts the request, which stops the walk.
 func (a *App) hSize(w http.ResponseWriter, r *http.Request) {
@@ -335,6 +337,14 @@ func (a *App) hSize(w http.ResponseWriter, r *http.Request) {
 			cur.Errors++
 			sizes = append(sizes, 0)
 			continue
+		}
+		if len(paths) == 1 {
+			cur.Mtime = info.ModTime().UnixMilli()
+			var sx unix.Statx_t
+			if err := unix.Statx(unix.AT_FDCWD, p, unix.AT_SYMLINK_NOFOLLOW, unix.STATX_BTIME, &sx); err == nil && sx.Mask&unix.STATX_BTIME != 0 {
+				cur.Btime = sx.Btime.Sec*1000 + int64(sx.Btime.Nsec)/1e6
+			}
+			emit() // dates are known at once, before the tree is walked
 		}
 		if !walk(p, info) {
 			return

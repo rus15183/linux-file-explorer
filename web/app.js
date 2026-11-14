@@ -25,7 +25,8 @@ const L = {
     delTitle: 'Удаление', delText: 'Удалить безвозвратно {0}?', delOne: '«{0}»',
     conflictTitle: 'Замена или пропуск файлов', conflictText: 'В папке назначения «{1}» уже есть элементы с такими именами ({0}):',
     andMore: '…и ещё {0}', replace: 'Заменить', skip: 'Пропустить', keepBoth: 'Сохранить оба',
-    size: 'Размер', sizeTitle: 'Размер: {0}', sizeTotal: 'Размер', filesN: 'Файлов', foldersN: 'Папок', bytes: 'байт',
+    props: 'Свойства', propsTitle: 'Свойства: {0}', sizeTotal: 'Размер', filesN: 'Файлов', foldersN: 'Папок', bytes: 'байт',
+    spaceKey: 'Пробел', pType: 'Тип', pWhere: 'Расположение', pCreated: 'Создан', pModified: 'Изменён', pItems: 'Элементов', pUnknown: 'неизвестно',
     counting: 'Идёт подсчёт…', unreadable: 'Не удалось прочитать элементов: {0}', close: 'Закрыть',
     gone: 'Папка «{0}» больше не существует.', offline: 'Нет связи с сервером',
     sameFolder: 'Конечная папка совпадает с исходной.', intoSelf: 'Нельзя переместить папку в саму себя.',
@@ -52,7 +53,8 @@ const L = {
     delTitle: 'Delete', delText: 'Permanently delete {0}?', delOne: '"{0}"',
     conflictTitle: 'Replace or skip files', conflictText: 'The destination "{1}" already has items with these names ({0}):',
     andMore: '…and {0} more', replace: 'Replace', skip: 'Skip', keepBoth: 'Keep both',
-    size: 'Size', sizeTitle: 'Size: {0}', sizeTotal: 'Size', filesN: 'Files', foldersN: 'Folders', bytes: 'bytes',
+    props: 'Properties', propsTitle: 'Properties: {0}', sizeTotal: 'Size', filesN: 'Files', foldersN: 'Folders', bytes: 'bytes',
+    spaceKey: 'Space', pType: 'Type', pWhere: 'Location', pCreated: 'Created', pModified: 'Modified', pItems: 'Items', pUnknown: 'unknown',
     counting: 'Calculating…', unreadable: 'Items that could not be read: {0}', close: 'Close',
     gone: 'Folder "{0}" no longer exists.', offline: 'No connection to the server',
     sameFolder: 'The destination folder is the same as the source.', intoSelf: 'Cannot move a folder into itself.',
@@ -81,6 +83,7 @@ function fmtDur(s) {
   return `${Math.floor(s / 3600)} ${t('hour')} ${Math.floor(s % 3600 / 60)} ${t('min')}`;
 }
 const fmtDate = ms => new Date(ms).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' });
+const fmtDateFull = ms => new Date(ms).toLocaleString(lang, { dateStyle: 'long', timeStyle: 'medium' });
 const join = (p, n) => (p === '/' ? '/' : p + '/') + n;
 const parent = p => p.slice(0, p.lastIndexOf('/')) || '/';
 const base = p => p.slice(p.lastIndexOf('/') + 1);
@@ -388,13 +391,17 @@ function download() {
   const a = el('a'); a.href = '/api/download?path=' + encodeURIComponent(join(S.path, e.name)); a.download = e.name;
   document.body.append(a); a.click(); a.remove();
 }
-// measure counts the size of the selection (or of the open folder when
-// nothing is selected), showing running totals while the server walks the tree.
+// measure is the Properties dialog for the selection (or for the open folder
+// when nothing is selected): type, location, dates for a single item, and the
+// size with file/folder counts, shown as running totals while the server walks the tree.
 async function measure() {
   const paths = selPaths().length ? selPaths() : [S.path];
-  const name = paths.length > 1 ? nItems(paths.length) : paths[0] === '/' ? t('computer') : base(paths[0]);
+  const many = paths.length > 1;
+  const one = !many && S.sel.size === 1 ? S.view.find(e => S.sel.has(e.name)) : null; // null: the open folder itself
+  const isDir = !one || one.dir;
+  const name = many ? nItems(paths.length) : paths[0] === '/' ? t('computer') : base(paths[0]);
   const ctl = new AbortController();
-  dialog({ title: t('sizeTitle', name), text: '', buttons: [{ id: 'ok', label: t('close'), primary: true }] }).then(() => ctl.abort());
+  dialog({ title: t('propsTitle', name), text: '', buttons: [{ id: 'ok', label: t('close'), primary: true }] }).then(() => ctl.abort());
   const mine = dlgClose;
   const busy = on => {
     paths.forEach(p => on ? S.measuring.add(p) : S.measuring.delete(p));
@@ -405,9 +412,18 @@ async function measure() {
   const show = r => {
     if (dlgClose !== mine) return;
     if (!r.done) $('dlgNote').textContent = t('counting') + (r.cur ? ' ' + r.cur : '');
-    $('dlgBody').textContent = `${t('sizeTotal')}: ${fmtSize(r.bytes)} (${num(r.bytes, 0)} ${t('bytes')})\n${t('filesN')}: ${num(r.files, 0)}\n${t('foldersN')}: ${num(r.dirs, 0)}`
-      + (r.errors ? '\n' + t('unreadable', r.errors) : '');
+    const g = el('div', 'props');
+    const row = (k, v) => g.append(el('span', 'k', k + ':'), el('span', null, v));
+    if (many) row(t('pItems'), num(paths.length, 0));
+    else if (paths[0] !== '/') row(t('pType'), one ? (one.link ? `${typeOf(one)} (${t('link')})` : typeOf(one)) : t('folder'));
+    if (paths[0] !== '/') row(t('pWhere'), parent(paths[0]));
+    row(t('sizeTotal'), `${fmtSize(r.bytes)} (${num(r.bytes, 0)} ${t('bytes')})`);
+    if (many || isDir) { row(t('filesN'), num(r.files, 0)); row(t('foldersN'), num(r.dirs, 0)); }
+    if (!many && r.mtime) { row(t('pCreated'), r.btime ? fmtDateFull(r.btime) : t('pUnknown')); row(t('pModified'), fmtDateFull(r.mtime)); }
+    if (r.errors) { const w = el('span', 'warn', t('unreadable', r.errors)); g.append(w); }
+    $('dlgBody').replaceChildren(g);
   };
+  show({ bytes: 0, files: 0, dirs: 0 });
   try {
     const resp = await fetch('/api/size', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-LFE': '1' },
@@ -493,7 +509,7 @@ pane.addEventListener('contextmenu', ev => {
       { label: t('rename'), key: 'F2', disabled: !one, run: rename },
       { label: t('delete'), key: 'Del', run: del },
       null,
-      { label: t('size'), run: measure },
+      { label: t('props'), key: t('spaceKey'), run: measure },
     ]);
   } else {
     S.sel.clear(); updateSel();
@@ -503,7 +519,7 @@ pane.addEventListener('contextmenu', ev => {
       null,
       { label: t('selectAll'), key: 'Ctrl+A', run: selectAll },
       { label: t('refresh'), run: () => { load(); loadDisks(); } },
-      { label: t('size'), run: measure },
+      { label: t('props'), key: t('spaceKey'), run: measure },
     ]);
   }
 });
@@ -523,6 +539,7 @@ document.addEventListener('keydown', ev => {
   else if (ctrl && is('F')) { $('filter').focus(); done(); }
   else if (k === 'delete') { del(); done(); }
   else if (k === 'f2') { rename(); done(); }
+  else if ((k === ' ' || code === 'Space') && !ctrl && ev.target.tagName !== 'BUTTON') { measure(); done(); }
   else if (k === 'backspace') { if (S.path !== '/') go(parent(S.path)); done(); }
   else if (k === 'enter') { if (S.sel.size === 1) openEntry(S.view.find(e => S.sel.has(e.name))); done(); }
   else if (['arrowdown', 'arrowup', 'home', 'end'].includes(k) && S.view.length) {
